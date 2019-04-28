@@ -23,6 +23,18 @@ public:
 		testCaseNumber++;
 	}
 
+	void testCase(ID3D11ComputeShader* shader, ID3D11Buffer* cb, ID3D11ShaderResourceView* source1, ID3D11ShaderResourceView* source2, const std::string& name)
+	{
+		const uint3 workloadThreadCount(1024, 1024, 4);
+		const uint3 workloadGroupSize(32, 32, 1);
+
+		QueryHandle query = dx.startPerformanceQuery(testCaseNumber, name);
+		dx.dispatch(shader, workloadThreadCount, workloadGroupSize, { cb }, { source1, source2 }, { output }, {});
+		dx.endPerformanceQuery(query);
+
+		testCaseNumber++;
+	}
+
 private:
 	DirectXDevice& dx;
 	ID3D11UnorderedAccessView* output;
@@ -106,6 +118,10 @@ int main(int argc, char *argv[])
 	com_ptr<ID3D11ComputeShader> shaderLoadStructured4dLinear = loadComputeShader(dx, "shaders/loadStructured4dLinear.cso");
 	com_ptr<ID3D11ComputeShader> shaderLoadStructured4dRandom = loadComputeShader(dx, "shaders/loadStructured4dRandom.cso");
 
+	com_ptr<ID3D11ComputeShader> shaderBranchBaseline = loadComputeShader(dx, "shaders/baseBranch.cso");
+	com_ptr<ID3D11ComputeShader> shaderBranchLong = loadComputeShader(dx, "shaders/longBranch.cso");
+	com_ptr<ID3D11ComputeShader> shaderBranchShort = loadComputeShader(dx, "shaders/shortBranch.cso");
+
 	// Create buffers and output UAV
 	com_ptr<ID3D11Buffer> bufferOutput = dx.createBuffer(2048, 4, DirectXDevice::BufferType::ByteAddress);
 	com_ptr<ID3D11Buffer> bufferInput = dx.createBuffer(1024, 16, DirectXDevice::BufferType::ByteAddress);
@@ -139,6 +155,36 @@ int main(int argc, char *argv[])
 	com_ptr<ID3D11Texture2D> texRGBA8 = dx.createTexture2d(uint2(32, 32), DXGI_FORMAT_R8G8B8A8_UNORM, 1);
 	com_ptr<ID3D11Texture2D> texRGBA16F = dx.createTexture2d(uint2(32, 32), DXGI_FORMAT_R16G16B16A16_FLOAT, 1);
 	com_ptr<ID3D11Texture2D> texRGBA32F = dx.createTexture2d(uint2(32, 32), DXGI_FORMAT_R32G32B32A32_FLOAT, 1);
+	D3D11_SUBRESOURCE_DATA texRGBA32F_coherent_init;
+	std::unique_ptr<float[]> texRGBA32F_coherent_init_arr;
+	{
+		int N = 1024;
+		texRGBA32F_coherent_init_arr.reset(new float[N * N * 4]);
+		memset(texRGBA32F_coherent_init_arr.get(), 0, N * N * 4 * 4);
+		for (int i = 0; i < N; i++)
+			for (int j = 0; j < N; j++)
+				if (i > N / 2 && j > N / 2 || i < N / 2 && j < N / 2)
+					texRGBA32F_coherent_init_arr[i * N * 4 + j * 4] = 1.0f;
+		texRGBA32F_coherent_init.pSysMem = texRGBA32F_coherent_init_arr.get();
+		texRGBA32F_coherent_init.SysMemPitch = N * 4 * 4;
+		texRGBA32F_coherent_init.SysMemSlicePitch = N * 4 * 4;
+	}
+	com_ptr<ID3D11Texture2D> texRGBA32F_coherent = dx.createTexture2d(uint2(1024, 1024), DXGI_FORMAT_R32G32B32A32_FLOAT, 1, &texRGBA32F_coherent_init);
+	D3D11_SUBRESOURCE_DATA texRGBA32F_divergent_init;
+	std::unique_ptr<float[]> texRGBA32F_divergent_init_arr;
+	{
+		int N = 1024;
+		texRGBA32F_divergent_init_arr.reset(new float[N * N * 4]);
+		memset(texRGBA32F_divergent_init_arr.get(), 0, N * N * 4 * 4);
+		for (int i = 0; i < N; i++)
+			for (int j = 0; j < N; j++)
+				if ((i & 1) ^ (j & 1))
+					texRGBA32F_divergent_init_arr[i * N * 4 + j * 4] = 1.0f;
+		texRGBA32F_divergent_init.pSysMem = texRGBA32F_divergent_init_arr.get();
+		texRGBA32F_divergent_init.SysMemPitch = N * 4 * 4;
+		texRGBA32F_divergent_init.SysMemSlicePitch = N * 4 * 4;
+	}
+	com_ptr<ID3D11Texture2D> texRGBA32F_divergent = dx.createTexture2d(uint2(1024, 1024), DXGI_FORMAT_R32G32B32A32_FLOAT, 1, &texRGBA32F_divergent_init);
 
 	// Texture SRVs
 	com_ptr<ID3D11ShaderResourceView> texSRV_R8 = dx.createSRV(texR8);
@@ -150,6 +196,8 @@ int main(int argc, char *argv[])
 	com_ptr<ID3D11ShaderResourceView> texSRV_RGBA8 = dx.createSRV(texRGBA8);
 	com_ptr<ID3D11ShaderResourceView> texSRV_RGBA16F = dx.createSRV(texRGBA16F);
 	com_ptr<ID3D11ShaderResourceView> texSRV_RGBA32F = dx.createSRV(texRGBA32F);
+	com_ptr<ID3D11ShaderResourceView> texSRV_RGBA32F_coherent = dx.createSRV(texRGBA32F_coherent);
+	com_ptr<ID3D11ShaderResourceView> texSRV_RGBA32F_divergent = dx.createSRV(texRGBA32F_divergent);
 
 	// Setup the constant buffer
 	LoadConstants loadConstants;
@@ -161,6 +209,15 @@ int main(int argc, char *argv[])
 	dx.updateConstantBuffer(loadCB, loadConstants);
 	loadConstants.readStartAddress = 4;			// Unaligned
 	dx.updateConstantBuffer(loadCBUnaligned, loadConstants);
+
+	std::map<uint32_t, com_ptr<ID3D11Buffer>> branchPayloadSizeCB;
+	for (uint32_t size = 0; size <= 128; size += 4)
+	{
+		branchPayloadSizeCB[size] = dx.createConstantBuffer(sizeof(LoadConstants));
+		loadConstants.readStartAddress = size;
+		dx.updateConstantBuffer(branchPayloadSizeCB[size], loadConstants);
+	}
+	
 	
 	// Setup constant buffer with float4 array for constant buffer load benchmarking
 	LoadConstantsWithArray loadConstantsWithArray;
@@ -204,6 +261,7 @@ int main(int argc, char *argv[])
 
 		BenchTest bench(dx, outputUAV);
 
+#if 0
 		bench.testCase(shaderLoadTyped1dInvariant, loadCB, typedSRV_R8, "Buffer<R8>.Load uniform");
 		bench.testCase(shaderLoadTyped1dLinear, loadCB, typedSRV_R8, "Buffer<R8>.Load linear");
 		bench.testCase(shaderLoadTyped1dRandom, loadCB, typedSRV_R8, "Buffer<R8>.Load random");
@@ -297,7 +355,19 @@ int main(int argc, char *argv[])
 		bench.testCase(shaderLoadTex4dInvariant, loadCB, texSRV_RGBA32F, "Texture2D<RGBA32F>.Load uniform");
 		bench.testCase(shaderLoadTex4dLinear, loadCB, texSRV_RGBA32F, "Texture2D<RGBA32F>.Load linear");
 		bench.testCase(shaderLoadTex4dRandom, loadCB, texSRV_RGBA32F, "Texture2D<RGBA32F>.Load random");
+#endif // 0
 
+		for (auto &item : branchPayloadSizeCB)
+		{
+			std::string num = std::to_string(item.first);
+			bench.testCase(shaderBranchBaseline, item.second, texSRV_RGBA32F_coherent, texSRV_RGBA32F_divergent, num + "X Coherent branch baseline");
+			bench.testCase(shaderBranchLong, item.second, texSRV_RGBA32F_coherent, texSRV_RGBA32F_divergent, num + "X Coherent branch long");
+			bench.testCase(shaderBranchShort, item.second, texSRV_RGBA32F_coherent, texSRV_RGBA32F_divergent, num + "X Coherent branch short");
+
+			bench.testCase(shaderBranchBaseline, item.second, texSRV_RGBA32F_divergent, texSRV_RGBA32F_coherent, num + "X Divergent branch baseline");
+			bench.testCase(shaderBranchLong, item.second, texSRV_RGBA32F_divergent, texSRV_RGBA32F_coherent, num + "X Divergent branch long");
+			bench.testCase(shaderBranchShort, item.second, texSRV_RGBA32F_divergent, texSRV_RGBA32F_coherent, num + "X Divergent branch short");
+		}
 		dx.presentFrame();
 
 		status = messagePump();
@@ -316,20 +386,16 @@ int main(int argc, char *argv[])
 
 	// Find comparison case
 	float compareToTime = 1.0f;
-	std::string compareToCase = "Buffer<RGBA8>.Load random";
+	std::string compareToCase = "Coherent branch baseline";
 	printf("\n\nPerformance compared to %s\n\n", compareToCase.c_str());
-	for (auto&& row : timingResults)
-	{
-		if (row.name == compareToCase)
-		{
-			compareToTime = row.totalTime;
-			break;
-		}
-	}
 
 	// Print results
 	for (auto&& row : timingResults)
 	{
+		if (row.name.find(compareToCase) != std::string::npos)
+		{
+			compareToTime = row.totalTime;
+		}
 		if (row.name == "") break;
 		printf("%s: %.3fms %.3fx\n", row.name.c_str(), row.totalTime, compareToTime / row.totalTime);
 	}

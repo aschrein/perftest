@@ -31,6 +31,9 @@
     <Filter Include="Shaders\constant_load">
       <UniqueIdentifier>{d9f28910-09d3-4e83-8c61-a18336adb25a}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Shaders\branches">
+      <UniqueIdentifier>{2862fd1a-db1e-49a3-ab2c-bffbbf1474df}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="directx.cpp">
@@ -195,6 +198,18 @@
     </FxCompile>
     <FxCompile Include="loadStructured2dRandom.hlsl">
       <Filter>Shaders\structured_load</Filter>
+    </FxCompile>
+    <FxCompile Include="longBranch.hlsl">
+      <Filter>Shaders\branches</Filter>
+    </FxCompile>
+    <FxCompile Include="baseBranch.hlsl">
+      <Filter>Shaders\branches</Filter>
+    </FxCompile>
+    <FxCompile Include="shortBranch.hlsl">
+      <Filter>Shaders\branches</Filter>
+    </FxCompile>
+    <FxCompile Include="branchesBody.hlsli">
+      <Filter>Shaders\branches</Filter>
     </FxCompile>
   </ItemGroup>
   <ItemGroup>

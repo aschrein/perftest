@@ -182,7 +182,7 @@ ID3D11Buffer* DirectXDevice::createBuffer(unsigned numElements, unsigned strideB
 	return buffer;
 }
 
-ID3D11Texture2D* DirectXDevice::createTexture2d(uint2 dimensions, DXGI_FORMAT format, unsigned mips)
+ID3D11Texture2D* DirectXDevice::createTexture2d(uint2 dimensions, DXGI_FORMAT format, unsigned mips, const D3D11_SUBRESOURCE_DATA *pInitialData)
 {
 	D3D11_TEXTURE2D_DESC desc;
 	desc.Width = dimensions.x;
@@ -198,7 +198,7 @@ ID3D11Texture2D* DirectXDevice::createTexture2d(uint2 dimensions, DXGI_FORMAT fo
 	desc.MiscFlags = 0;
 
 	ID3D11Texture2D *texture = nullptr;
-	HRESULT result = device->CreateTexture2D(&desc, nullptr, &texture);
+	HRESULT result = device->CreateTexture2D(&desc, pInitialData, &texture);
 	assert(SUCCEEDED(result));
 	return texture;
 }
